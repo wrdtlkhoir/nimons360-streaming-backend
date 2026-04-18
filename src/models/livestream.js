@@ -99,9 +99,33 @@ class LivestreamModel {
       .sort((a, b) => b.startTime - a.startTime);
   }
 
+  // Get active livestreams from family members
+  static getActiveFamilyLivestreams(familyMemberIds) {
+    return Array.from(livestreams.values())
+      .filter(stream => 
+        stream.status === 'active' && 
+        familyMemberIds.includes(stream.userId)
+      );
+  }
+
+  // Get livestream by user (excluding ended)
+  static getUserActiveLivestream(userId) {
+    const streams = Array.from(livestreams.values())
+      .filter(stream => 
+        stream.userId === userId && 
+        stream.status === 'active'
+      );
+    return streams.length > 0 ? streams[0] : null;
+  }
+
   // Delete livestream
   static deleteLivestream(id) {
     return livestreams.delete(id);
+  }
+
+  // Get all livestreams for debugging
+  static getAllLivestreams() {
+    return Array.from(livestreams.values());
   }
 }
 

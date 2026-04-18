@@ -5,7 +5,11 @@ const socketIO = require('socket.io');
 require('dotenv').config();
 
 const livestreamRoutes = require('./routes/livestream');
+const familyRoutes = require('./routes/family');
+const notificationRoutes = require('./routes/notification');
 const LivestreamModel = require('./models/livestream');
+const FamilyModel = require('./models/family');
+const NotificationModel = require('./models/notification');
 
 const app = express();
 const server = http.createServer(app);
@@ -46,16 +50,35 @@ app.get('/api/health', (req, res) => {
 // Livestream API routes
 app.use('/api/livestream', livestreamRoutes);
 
+// Family API routes
+app.use('/api/family', familyRoutes);
+
+// Notification API routes
+app.use('/api/notification', notificationRoutes);
+
 // Store active connections
 const userStreams = new Map(); // Map: userId -> { socketId, livestreamId }
+const userConnections = new Map(); // Map: userId -> { socketId, familyIds }
 
 // Socket.IO connection untuk livestream signaling
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   
+  // Event: User register dengan family info
+  socket.on('user-login', (data) => {
+    const { userId, familyIds = [] } = data;
+    
+    userConnections.set(userId, {
+      socketId: socket.id,
+      familyIds: Array.isArray(familyIds) ? familyIds : [familyIds]
+    });
+    
+    console.log(`User ${userId} logged in with families:`, familyIds);
+  });
+  
   // Event: User mulai livestream
   socket.on('start-stream', (data) => {
-    const { userId, userName, title, description } = data;
+    const { userId, userName, title, description, familyIds = [] } = data;
     
     const livestream = LivestreamModel.createLivestream(
       userId,
@@ -70,16 +93,71 @@ io.on('connection', (socket) => {
       livestreamId: livestream.id
     });
     
+    // Store family IDs if provided
+    if (userConnections.has(userId)) {
+      userConnections.get(userId).familyIds = Array.isArray(familyIds) ? familyIds : [familyIds];
+    } else {
+      userConnections.set(userId, {
+        socketId: socket.id,
+        familyIds: Array.isArray(familyIds) ? familyIds : [familyIds]
+      });
+    }
+    
     // Join socket ke room khusus
     socket.join(livestream.id);
     
     // Broadcast ke semua client bahwa ada livestream baru
     io.emit('stream-started', {
       livestreamId: livestream.id,
+      userId: userId,
       userName: livestream.userName,
       title: livestream.title,
-      description: livestream.description
+      description: livestream.description,
+      startTime: livestream.startTime
     });
+    
+    // Send notifications to family members
+    if (Array.isArray(familyIds) && familyIds.length > 0) {
+      familyIds.forEach(familyId => {
+        const family = FamilyModel.getFamily(familyId);
+        if (family && family.members) {
+          family.members.forEach(memberId => {
+            if (memberId !== userId) {
+              // Create notification for family member
+              const notification = NotificationModel.createNotification(
+                memberId,
+                'livestream_started',
+                {
+                  relatedUserId: userId,
+                  relatedUserName: userName,
+                  relatedUserAvatar: null,
+                  livestreamId: livestream.id,
+                  livestreamTitle: title,
+                  message: `${userName} sedang melakukan livestream: ${title}`
+                }
+              );
+              
+              // Emit notification via Socket.IO to that specific user
+              userConnections.forEach((conn, connUserId) => {
+                if (connUserId === memberId) {
+                  io.to(conn.socketId).emit('family-livestream-started', {
+                    notification: notification,
+                    livestream: {
+                      id: livestream.id,
+                      userId: userId,
+                      userName: userName,
+                      title: title,
+                      description: description,
+                      startTime: livestream.startTime
+                    }
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+    }
     
     console.log(`${userName} mulai livestream: ${livestream.id}`);
   });
@@ -158,7 +236,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
-    // Cari user yang disconnect
+    // Cari user yang disconnect di userStreams
     for (let [userId, stream] of userStreams.entries()) {
       if (stream.socketId === socket.id) {
         // End livestream jika broadcaster disconnect
@@ -168,6 +246,15 @@ io.on('connection', (socket) => {
         });
         userStreams.delete(userId);
         console.log(`Livestream ${stream.livestreamId} ended (broadcaster disconnected)`);
+        break;
+      }
+    }
+    
+    // Cari user yang disconnect di userConnections
+    for (let [userId, conn] of userConnections.entries()) {
+      if (conn.socketId === socket.id) {
+        userConnections.delete(userId);
+        console.log(`User ${userId} connection removed`);
         break;
       }
     }

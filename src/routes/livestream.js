@@ -8,6 +8,9 @@ router.post('/start', LivestreamController.startLivestream);
 // GET - Get all active livestreams
 router.get('/active', LivestreamController.getActiveLivestreams);
 
+// POST - Get active livestreams from family members
+router.post('/family/active', LivestreamController.getActiveFamilyLivestreams);
+
 // GET - Get livestream detail
 router.get('/:id', LivestreamController.getLivestream);
 

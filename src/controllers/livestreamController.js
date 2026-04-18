@@ -182,6 +182,32 @@ class LivestreamController {
       });
     }
   }
+
+  // Get active livestreams from family members
+  static getActiveFamilyLivestreams(req, res) {
+    try {
+      const { familyMemberIds } = req.body;
+
+      if (!familyMemberIds || !Array.isArray(familyMemberIds)) {
+        return res.status(400).json({
+          error: 'familyMemberIds harus diisi dan berupa array'
+        });
+      }
+
+      const streams = LivestreamModel.getActiveFamilyLivestreams(familyMemberIds);
+
+      res.status(200).json({
+        success: true,
+        data: streams,
+        count: streams.length
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = LivestreamController;
